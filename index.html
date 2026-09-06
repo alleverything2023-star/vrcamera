@@ -56,7 +56,7 @@
 <body>
 
 <div id="ui">
-  <button id="start-btn">カメラ & YouTube VRモード起動</button>
+  <button id="start-btn">カメラ & VRモード起動</button>
   <p id="status">ボタンを押してカメラとセンサーを許可してください。端末を横向きにしてご使用ください。</p>
   
   <div class="control-group">
@@ -95,7 +95,6 @@
         await DeviceOrientationEvent.requestPermission();
       }
 
-      // 最広角（最小ズーム）カメラの呼び出し
       const constraints = {
         video: {
           facingMode: { ideal: "environment" },
@@ -140,7 +139,6 @@
   function initThreeJS() {
     scene = new THREE.Scene();
 
-    // 表示領域を小さくするためのアスペクト比計算 (正方形に近いアスペクト)
     const aspect = 1.0; 
     cameraLeft = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
     cameraRight = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
@@ -156,11 +154,11 @@
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // YouTube VR風のレンズ歪みシェーダー（手書き画像通りの正方形カットアウト & 270度回転）
+    // シェーダー（270度回転 ＋ 左右反転修正 ＋ 樽型歪み補正）
     const fisheyeShaderMaterial = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: videoTexture },
-        k: { value: 0.18 } // YouTube VR標準に近い樽型歪み補正係数
+        k: { value: 0.18 }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -174,21 +172,22 @@
         uniform float k;
         varying vec2 vUv;
 
-        // 向き合わせ用の270度回転
-        vec2 rotate270(vec2 uv) {
-            return vec2(1.0 - uv.y, uv.x);
+        // 270度回転 ＋ 左右反転（鏡像の修正）
+        vec2 rotate270AndFlip(vec2 uv) {
+            vec2 rotated = vec2(1.0 - uv.y, uv.x);
+            return vec2(1.0 - rotated.x, rotated.y); // X軸を反転させて正しい向きに戻す
         }
 
         void main() {
-          vec2 rotatedUv = rotate270(vUv);
-          vec2 p = rotatedUv * 2.0 - 1.0;
+          vec2 correctedUv = rotate270AndFlip(vUv);
+          vec2 p = correctedUv * 2.0 - 1.0;
           float r2 = p.x * p.x + p.y * p.y;
 
-          // YouTube VR風の樽型レンズ歪み処理
+          // 樽型歪み処理
           vec2 distortion = p * (1.0 + k * r2);
           vec2 finalUv = (distortion + 1.0) * 0.5;
 
-          // 範囲外を黒く塗りつぶし（正方形の枠）
+          // 正方形の領域外は黒くする
           if (finalUv.x >= 0.0 && finalUv.x <= 1.0 && finalUv.y >= 0.0 && finalUv.y <= 1.0) {
             gl_FragColor = texture2D(map, finalUv);
           } else {
@@ -241,28 +240,22 @@
 
     renderer.clear();
 
-    // --- 画像のイラスト通りのビューポート配置設定 ---
-    // 画面左右それぞれの枠幅（半分の幅）
     const halfWidth = width / 2;
-    
-    // 表示サイズ（左右それぞれの画面中央に約70%のサイズで配置）
     const viewSize = Math.min(halfWidth, height) * 0.70;
 
-    // 左目の表示位置 (左半分の中央)
     const leftX = (halfWidth - viewSize) / 2;
     const leftY = (height - viewSize) / 2;
 
-    // 右目の表示位置 (右半分の中央)
     const rightX = halfWidth + (halfWidth - viewSize) / 2;
     const rightY = (height - viewSize) / 2;
 
-    // 1. 左目の描画
+    // 左目
     renderer.setViewport(leftX, leftY, viewSize, viewSize);
     renderer.setScissor(leftX, leftY, viewSize, viewSize);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraLeft);
 
-    // 2. 右目の描画
+    // 右目
     renderer.setViewport(rightX, rightY, viewSize, viewSize);
     renderer.setScissor(rightX, rightY, viewSize, viewSize);
     renderer.setScissorTest(true);
