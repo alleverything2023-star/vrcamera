@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-  <title>YouTube VR Style Panoramic Camera Viewer</title>
+  <title>YouTube VR180 Fisheye Camera Viewer</title>
   <style>
     body {
       margin: 0;
@@ -91,10 +91,13 @@
     ui.style.display = 'none';
 
     try {
+      // 超広角レンズ（0.5x等）を優先的に選択してズームを解除するパラメータ設定
       const constraints = {
         video: {
           facingMode: { ideal: "environment" },
-          zoom: { ideal: 0 }
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          zoom: { ideal: 0.5 } 
         },
         audio: false
       };
@@ -103,6 +106,7 @@
       video.srcObject = stream;
       await video.play();
 
+      // カメラがサポートしている場合は最小倍率（広角側）に完全固定
       const track = stream.getVideoTracks()[0];
       if (track && track.getCapabilities) {
         const capabilities = track.getCapabilities();
@@ -134,15 +138,11 @@
   function initThreeJS() {
     scene = new THREE.Scene();
 
-    // 視野角(FOV)を100に広げて視点を「引き」に設定
+    // 視野角(FOV)を120度の超超広角にして「望遠鏡（ズーム）感」を撤去
     const aspect = (window.innerWidth / 2) / window.innerHeight;
-    cameraLeft = new THREE.PerspectiveCamera(100, aspect, 0.1, 1000);
-    cameraRight = new THREE.PerspectiveCamera(100, aspect, 0.1, 1000);
+    cameraLeft = new THREE.PerspectiveCamera(120, aspect, 0.01, 100);
+    cameraRight = new THREE.PerspectiveCamera(120, aspect, 0.01, 100);
     
-    // 正面を向かせる
-    cameraLeft.lookAt(0, 0, -1);
-    cameraRight.lookAt(0, 0, -1);
-
     updateCameraPositions();
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -154,36 +154,56 @@
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // YouTube VR規格（Equirectangular / パノラマドームマッピング ＋ 向き補正）
-    const vrPanoramicMaterial = new THREE.ShaderMaterial({
+    // VR180 Creator / Insta360等と同等仕様の 180° Equisolid 魚眼シェーダー
+    const vr180FisheyeMaterial = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: videoTexture }
       },
       vertexShader: `
-        varying vec2 vUv;
+        varying vec3 vWorldPosition;
         void main() {
-          vUv = uv;
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPosition.xyz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
         uniform sampler2D map;
-        varying vec2 vUv;
+        varying vec3 vWorldPosition;
+
+        #define PI 3.14159265359
 
         void main() {
-          // 90度回転のズレを解消し、正しく横画面へ適合させるUV変換
-          vec2 correctedUv = vec2(vUv.x, 1.0 - vUv.y);
+          vec3 dir = normalize(vWorldPosition);
 
-          // 自然な広角パノラマ表示（伸ばさずに描画）
-          gl_FragColor = texture2D(map, correctedUv);
+          // 球体座標から魚眼角度 theta / phi を算出
+          float theta = atan(dir.x, -dir.z); // 水平角
+          float phi = asin(dir.y);          // 垂直角
+
+          // 180度魚眼マッピング（Equisolid / Equidistant 式展開）
+          float r = 2.0 * sin(acos(-dir.z) / 2.0); 
+          float angle = atan(dir.y, dir.x);
+
+          vec2 uv;
+          uv.x = (r * cos(angle)) * 0.5 + 0.5;
+          
+          // ★上下反転の修正（1.0 - にすることで正しい正位置へ）
+          uv.y = 1.0 - ((r * sin(angle)) * 0.5 + 0.5);
+
+          // 180度範囲外は黒としてマスク
+          if (dir.z < 0.0 && uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            gl_FragColor = texture2D(map, uv);
+          } else {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          }
         }
       `,
       side: THREE.BackSide
     });
 
-    // 180度ドーム状にカメラ映像を張り巡らせる（球体の内側）
+    // 180度ドーム型の3D全天球ドームメッシュを作成
     const geometry = new THREE.SphereGeometry(10, 64, 64, 0, Math.PI * 2, 0, Math.PI);
-    const sphere = new THREE.Mesh(geometry, vrPanoramicMaterial);
+    const sphere = new THREE.Mesh(geometry, vr180FisheyeMaterial);
     scene.add(sphere);
 
     animate();
@@ -192,8 +212,12 @@
 
   function updateCameraPositions() {
     if (cameraLeft && cameraRight) {
-      cameraLeft.position.set(-eyeSep / 2, 0, 0);
-      cameraRight.position.set(eyeSep / 2, 0, 0);
+      // カメラ位置を少し前方に押し出すことで望遠感を無くし視野を完全確保
+      cameraLeft.position.set(-eyeSep / 2, 0, 0.1);
+      cameraRight.position.set(eyeSep / 2, 0, 0.1);
+      
+      cameraLeft.lookAt(0, 0, -10);
+      cameraRight.lookAt(0, 0, -10);
     }
   }
 
@@ -209,13 +233,13 @@
 
     const halfWidth = width / 2;
 
-    // 左目（画面左半分全域）
+    // 左目表示
     renderer.setViewport(0, 0, halfWidth, height);
     renderer.setScissor(0, 0, halfWidth, height);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraLeft);
 
-    // 右目（画面右半分全域）
+    // 右目表示
     renderer.setViewport(halfWidth, 0, halfWidth, height);
     renderer.setScissor(halfWidth, 0, halfWidth, height);
     renderer.setScissorTest(true);
