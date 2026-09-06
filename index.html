@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Fisheye Camera Viewer</title>
+  <title>VR Stereo Fisheye Camera</title>
   <style>
     body {
       margin: 0;
@@ -11,54 +11,85 @@
       background-color: #000;
       font-family: sans-serif;
     }
-    #info {
+    #ui {
       position: absolute;
       top: 10px;
       left: 10px;
       color: white;
       z-index: 10;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 12px;
       border-radius: 8px;
+      max-width: 300px;
     }
     button {
       padding: 8px 16px;
       font-size: 14px;
       cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .control-group {
+      margin-top: 8px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    input[type="range"] {
+      width: 100%;
     }
   </style>
 
   <script type="importmap">
     {
       "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
       }
     }
   </script>
 </head>
 <body>
 
-<div id="info">
-  <button id="start-btn">カメラを起動</button>
-  <p id="status">ボタンを押してカメラを許可してください。</p>
+<div id="ui">
+  <button id="start-btn">カメラ & VRモード起動</button>
+  <p id="status">ボタンを押してカメラとセンサーを許可してください。</p>
+  
+  <div class="control-group">
+    <label for="ipd-range">目の間隔調整 (IPD): <span id="ipd-val">0.064</span></label>
+    <input type="range" id="ipd-range" min="0.03" max="0.10" step="0.002" value="0.064">
+  </div>
 </div>
 
 <video id="webcam" autoplay playsinline style="display:none;"></video>
 
 <script type="module">
   import * as THREE from 'three';
-  import { VRButton } from 'three/addons/webxr/VRButton.js';
 
-  let scene, camera, renderer, video, videoTexture;
+  let scene, cameraLeft, cameraRight, renderer, video, videoTexture;
+  let eyeSep = 0.064; // 既定の瞳孔間距離 (6.4cm)
 
   const startBtn = document.getElementById('start-btn');
   const status = document.getElementById('status');
+  const ipdRange = document.getElementById('ipd-range');
+  const ipdVal = document.getElementById('ipd-val');
   video = document.getElementById('webcam');
+
+  // 目の間隔のスライダー調整
+  ipdRange.addEventListener('input', (e) => {
+    eyeSep = parseFloat(e.target.value);
+    ipdVal.textContent = eyeSep.toFixed(3);
+    updateCameraPositions();
+  });
 
   startBtn.addEventListener('click', async () => {
     try {
-      // 背面カメラの取得を試行、失敗した場合は標準カメラを取得
+      // iOSなどのジャイロセンサー許可要求
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        await DeviceOrientationEvent.requestPermission();
+      }
+
+      // カメラ起動
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
         audio: false
@@ -67,37 +98,40 @@
       video.srcObject = stream;
       await video.play();
 
-      status.textContent = "カメラ接続完了。VRボタンを押して開始してください。";
-      startBtn.style.display = 'none';
+      document.getElementById('ui').style.opacity = '0.3'; // 操作パネルを半透明化
+      status.textContent = "動作中 (ゴーグルにセットしてください)";
 
       initThreeJS();
+      setupDeviceOrientation();
     } catch (err) {
-      status.textContent = "カメラのアクセスに失敗しました: " + err.message;
+      status.textContent = "起動に失敗しました: " + err.message;
     }
   });
 
   function initThreeJS() {
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 0);
+
+    // 左右2つのカメラを作成
+    const aspect = (window.innerWidth / 2) / window.innerHeight;
+    cameraLeft = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+    cameraRight = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+    
+    updateCameraPositions();
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.xr.enabled = true;
+    renderer.autoClear = false; // 左右描画のため自動クリアをオフ
     document.body.appendChild(renderer.domElement);
-
-    // モジュールからインポートしたVRButtonを生成
-    document.body.appendChild(VRButton.createButton(renderer));
 
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // 魚眼変換シェーダー
+    // 魚眼シェーダーマテリアル
     const fisheyeShaderMaterial = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: videoTexture },
-        strength: { value: 1.2 } // 魚眼の歪み具合
+        strength: { value: 1.2 }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -135,18 +169,68 @@
     const sphere = new THREE.Mesh(geometry, fisheyeShaderMaterial);
     scene.add(sphere);
 
-    renderer.setAnimationLoop(render);
+    animate();
     window.addEventListener('resize', onWindowResize);
   }
 
-  function render() {
-    renderer.render(scene, camera);
+  // 瞳孔間距離（IPD）に基づいて左右カメラの位置を更新
+  function updateCameraPositions() {
+    if (cameraLeft && cameraRight) {
+      cameraLeft.position.set(-eyeSep / 2, 0, 0);
+      cameraRight.position.set(eyeSep / 2, 0, 0);
+    }
+  }
+
+  // スマホの傾きに合わせてカメラを回転させる処理
+  function setupDeviceOrientation() {
+    window.addEventListener('deviceorientation', (event) => {
+      if (!event.alpha) return;
+
+      const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
+      const beta = THREE.MathUtils.degToRad(event.beta || 0);
+      const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
+
+      const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+      
+      // 左右両方のカメラの向きを揃える
+      cameraLeft.quaternion.setFromEuler(euler);
+      cameraRight.quaternion.setFromEuler(euler);
+    });
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    renderer.clear();
+
+    // 1. 左目用レンダリング（画面の左半分）
+    renderer.setViewport(0, 0, width / 2, height);
+    renderer.setScissor(0, 0, width / 2, height);
+    renderer.setScissorTest(true);
+    renderer.render(scene, cameraLeft);
+
+    // 2. 右目用レンダリング（画面の右半分）
+    renderer.setViewport(width / 2, 0, width / 2, height);
+    renderer.setScissor(width / 2, 0, width / 2, height);
+    renderer.setScissorTest(true);
+    renderer.render(scene, cameraRight);
   }
 
   function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const aspect = (width / 2) / height;
+
+    cameraLeft.aspect = aspect;
+    cameraLeft.updateProjectionMatrix();
+
+    cameraRight.aspect = aspect;
+    cameraRight.updateProjectionMatrix();
+
+    renderer.setSize(width, height);
   }
 </script>
 
