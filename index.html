@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-  <title>Fixed YouTube VR Style Camera Viewer</title>
+  <title>YouTube VR Style Panoramic Camera Viewer</title>
   <style>
     body {
       margin: 0;
@@ -134,11 +134,12 @@
   function initThreeJS() {
     scene = new THREE.Scene();
 
-    const aspect = 1.0; 
-    cameraLeft = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
-    cameraRight = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+    // 視野角(FOV)を100に広げて視点を「引き」に設定
+    const aspect = (window.innerWidth / 2) / window.innerHeight;
+    cameraLeft = new THREE.PerspectiveCamera(100, aspect, 0.1, 1000);
+    cameraRight = new THREE.PerspectiveCamera(100, aspect, 0.1, 1000);
     
-    // カメラの向きを正面に完全固定
+    // 正面を向かせる
     cameraLeft.lookAt(0, 0, -1);
     cameraRight.lookAt(0, 0, -1);
 
@@ -153,11 +154,10 @@
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // シェーダー（方向補正 ＋ 正しい左右向き ＋ 歪み補正）
-    const fisheyeShaderMaterial = new THREE.ShaderMaterial({
+    // YouTube VR規格（Equirectangular / パノラマドームマッピング ＋ 向き補正）
+    const vrPanoramicMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        map: { value: videoTexture },
-        k: { value: 0.18 }
+        map: { value: videoTexture }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -168,34 +168,22 @@
       `,
       fragmentShader: `
         uniform sampler2D map;
-        uniform float k;
         varying vec2 vUv;
 
-        vec2 rotate270AndFlip(vec2 uv) {
-            vec2 rotated = vec2(1.0 - uv.y, uv.x);
-            return vec2(1.0 - rotated.x, rotated.y);
-        }
-
         void main() {
-          vec2 correctedUv = rotate270AndFlip(vUv);
-          vec2 p = correctedUv * 2.0 - 1.0;
-          float r2 = p.x * p.x + p.y * p.y;
+          // 90度回転のズレを解消し、正しく横画面へ適合させるUV変換
+          vec2 correctedUv = vec2(vUv.x, 1.0 - vUv.y);
 
-          vec2 distortion = p * (1.0 + k * r2);
-          vec2 finalUv = (distortion + 1.0) * 0.5;
-
-          if (finalUv.x >= 0.0 && finalUv.x <= 1.0 && finalUv.y >= 0.0 && finalUv.y <= 1.0) {
-            gl_FragColor = texture2D(map, finalUv);
-          } else {
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-          }
+          // 自然な広角パノラマ表示（伸ばさずに描画）
+          gl_FragColor = texture2D(map, correctedUv);
         }
       `,
       side: THREE.BackSide
     });
 
-    const geometry = new THREE.SphereGeometry(10, 64, 64);
-    const sphere = new THREE.Mesh(geometry, fisheyeShaderMaterial);
+    // 180度ドーム状にカメラ映像を張り巡らせる（球体の内側）
+    const geometry = new THREE.SphereGeometry(10, 64, 64, 0, Math.PI * 2, 0, Math.PI);
+    const sphere = new THREE.Mesh(geometry, vrPanoramicMaterial);
     scene.add(sphere);
 
     animate();
@@ -204,8 +192,8 @@
 
   function updateCameraPositions() {
     if (cameraLeft && cameraRight) {
-      cameraLeft.position.set(-eyeSep / 2, 0, -1);
-      cameraRight.position.set(eyeSep / 2, 0, -1);
+      cameraLeft.position.set(-eyeSep / 2, 0, 0);
+      cameraRight.position.set(eyeSep / 2, 0, 0);
     }
   }
 
@@ -220,29 +208,34 @@
     renderer.clear();
 
     const halfWidth = width / 2;
-    const viewSize = Math.min(halfWidth, height) * 0.70;
 
-    const leftX = (halfWidth - viewSize) / 2;
-    const leftY = (height - viewSize) / 2;
-
-    const rightX = halfWidth + (halfWidth - viewSize) / 2;
-    const rightY = (height - viewSize) / 2;
-
-    // 左目
-    renderer.setViewport(leftX, leftY, viewSize, viewSize);
-    renderer.setScissor(leftX, leftY, viewSize, viewSize);
+    // 左目（画面左半分全域）
+    renderer.setViewport(0, 0, halfWidth, height);
+    renderer.setScissor(0, 0, halfWidth, height);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraLeft);
 
-    // 右目
-    renderer.setViewport(rightX, rightY, viewSize, viewSize);
-    renderer.setScissor(rightX, rightY, viewSize, viewSize);
+    // 右目（画面右半分全域）
+    renderer.setViewport(halfWidth, 0, halfWidth, height);
+    renderer.setScissor(halfWidth, 0, halfWidth, height);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraRight);
   }
 
   function onWindowResize() {
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const aspect = (width / 2) / height;
+
+    if (cameraLeft && cameraRight) {
+      cameraLeft.aspect = aspect;
+      cameraLeft.updateProjectionMatrix();
+
+      cameraRight.aspect = aspect;
+      cameraRight.updateProjectionMatrix();
+    }
+
+    renderer.setSize(width, height);
   }
 </script>
 
