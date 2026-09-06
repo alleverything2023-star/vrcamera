@@ -87,26 +87,41 @@
   });
 
   startBtn.addEventListener('click', async () => {
-    // 1. ブラウザを全画面（フルスクリーン）に切り替えてアドレスバーを隠す
     requestFullScreenMode();
-
-    // 2. UI要素（ボタンやURLバー周りの要素）を非表示にする
     ui.style.display = 'none';
 
     try {
-      // センサーアクセスの許可（iOS等の対応）
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         await DeviceOrientationEvent.requestPermission();
       }
 
-      // 背面カメラの起動
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+      // 1. カメラ設定（倍率を最小にし、超広角レンズを優先取得）
+      const constraints = {
+        video: {
+          facingMode: { ideal: "environment" },
+          zoom: { ideal: 0 } // 可能であれば倍率を最小（0）に指定
+        },
         audio: false
-      });
+      };
 
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream;
       await video.play();
+
+      // カメラがズームAPIに対応している場合、最広角(最小値)へ設定変更を試行
+      const track = stream.getVideoTracks()[0];
+      if (track && track.getCapabilities) {
+        const capabilities = track.getCapabilities();
+        if (capabilities.zoom) {
+          try {
+            await track.applyConstraints({
+              advanced: [{ zoom: capabilities.zoom.min }]
+            });
+          } catch (e) {
+            console.log("Zoom constraint failed:", e);
+          }
+        }
+      }
 
       initThreeJS();
       setupDeviceOrientation();
@@ -116,12 +131,11 @@
     }
   });
 
-  // 全画面表示APIの呼び出し処理
   function requestFullScreenMode() {
     const docEl = document.documentElement;
     if (docEl.requestFullscreen) {
       docEl.requestFullscreen().catch(() => {});
-    } else if (docEl.webkitRequestFullscreen) { /* iOS / Safari 用 */
+    } else if (docEl.webkitRequestFullscreen) {
       docEl.webkitRequestFullscreen().catch(() => {});
     } else if (docEl.msRequestFullscreen) {
       docEl.msRequestFullscreen().catch(() => {});
@@ -146,7 +160,7 @@
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // 映像90度回転 ＋ 魚眼レンズ変換シェーダー
+    // シェーダー（270度回転[=90度+180度反転] & 15%縮小[0.85倍]）
     const fisheyeShaderMaterial = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: videoTexture },
@@ -164,19 +178,23 @@
         uniform float strength;
         varying vec2 vUv;
 
-        // UV座標を90度回転
-        vec2 rotate90(vec2 uv) {
-            return vec2(uv.y, 1.0 - uv.x);
+        // 180度反転させた回転（270度回転）
+        vec2 rotate270(vec2 uv) {
+            return vec2(1.0 - uv.y, uv.x);
         }
 
         void main() {
-          vec2 rotatedUv = rotate90(vUv);
+          vec2 rotatedUv = rotate270(vUv);
           vec2 p = rotatedUv * 2.0 - 1.0;
           float r = length(p);
 
-          if (r < 1.0) {
+          // 半径の上限を 0.85 (15%縮小) に制限（中心は保持）
+          if (r < 0.85) {
             float theta = atan(p.y, p.x);
-            float radius = pow(r, strength);
+            // 縮小した領域に合わせてUV座標を補正
+            float normalizedR = r / 0.85;
+            float radius = pow(normalizedR, strength);
+            
             vec2 finalUv;
             finalUv.x = radius * cos(theta);
             finalUv.y = radius * sin(theta);
@@ -233,13 +251,13 @@
 
     renderer.clear();
 
-    // 左目用描画
+    // 左目
     renderer.setViewport(0, 0, width / 2, height);
     renderer.setScissor(0, 0, width / 2, height);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraLeft);
 
-    // 右目用描画
+    // 右目
     renderer.setViewport(width / 2, 0, width / 2, height);
     renderer.setScissor(width / 2, 0, width / 2, height);
     renderer.setScissorTest(true);
