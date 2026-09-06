@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-  <title>VR Stereo Fisheye Camera Viewer</title>
+  <title>YouTube VR Style Camera Viewer</title>
   <style>
     body {
       margin: 0;
@@ -56,7 +56,7 @@
 <body>
 
 <div id="ui">
-  <button id="start-btn">カメラ & VRモード起動 (全画面)</button>
+  <button id="start-btn">カメラ & YouTube VRモード起動</button>
   <p id="status">ボタンを押してカメラとセンサーを許可してください。端末を横向きにしてご使用ください。</p>
   
   <div class="control-group">
@@ -95,11 +95,11 @@
         await DeviceOrientationEvent.requestPermission();
       }
 
-      // 1. カメラ設定（倍率を最小にし、超広角レンズを優先取得）
+      // 最広角（最小ズーム）カメラの呼び出し
       const constraints = {
         video: {
           facingMode: { ideal: "environment" },
-          zoom: { ideal: 0 } // 可能であれば倍率を最小（0）に指定
+          zoom: { ideal: 0 }
         },
         audio: false
       };
@@ -108,18 +108,13 @@
       video.srcObject = stream;
       await video.play();
 
-      // カメラがズームAPIに対応している場合、最広角(最小値)へ設定変更を試行
       const track = stream.getVideoTracks()[0];
       if (track && track.getCapabilities) {
         const capabilities = track.getCapabilities();
         if (capabilities.zoom) {
           try {
-            await track.applyConstraints({
-              advanced: [{ zoom: capabilities.zoom.min }]
-            });
-          } catch (e) {
-            console.log("Zoom constraint failed:", e);
-          }
+            await track.applyConstraints({ advanced: [{ zoom: capabilities.zoom.min }] });
+          } catch (e) {}
         }
       }
 
@@ -145,7 +140,8 @@
   function initThreeJS() {
     scene = new THREE.Scene();
 
-    const aspect = (window.innerWidth / 2) / window.innerHeight;
+    // 表示領域を小さくするためのアスペクト比計算 (正方形に近いアスペクト)
+    const aspect = 1.0; 
     cameraLeft = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
     cameraRight = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
     
@@ -160,11 +156,11 @@
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // シェーダー（270度回転[=90度+180度反転] & 15%縮小[0.85倍]）
+    // YouTube VR風のレンズ歪みシェーダー（手書き画像通りの正方形カットアウト & 270度回転）
     const fisheyeShaderMaterial = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: videoTexture },
-        strength: { value: 1.2 }
+        k: { value: 0.18 } // YouTube VR標準に近い樽型歪み補正係数
       },
       vertexShader: `
         varying vec2 vUv;
@@ -175,10 +171,10 @@
       `,
       fragmentShader: `
         uniform sampler2D map;
-        uniform float strength;
+        uniform float k;
         varying vec2 vUv;
 
-        // 180度反転させた回転（270度回転）
+        // 向き合わせ用の270度回転
         vec2 rotate270(vec2 uv) {
             return vec2(1.0 - uv.y, uv.x);
         }
@@ -186,20 +182,14 @@
         void main() {
           vec2 rotatedUv = rotate270(vUv);
           vec2 p = rotatedUv * 2.0 - 1.0;
-          float r = length(p);
+          float r2 = p.x * p.x + p.y * p.y;
 
-          // 半径の上限を 0.85 (15%縮小) に制限（中心は保持）
-          if (r < 0.85) {
-            float theta = atan(p.y, p.x);
-            // 縮小した領域に合わせてUV座標を補正
-            float normalizedR = r / 0.85;
-            float radius = pow(normalizedR, strength);
-            
-            vec2 finalUv;
-            finalUv.x = radius * cos(theta);
-            finalUv.y = radius * sin(theta);
-            
-            finalUv = (finalUv + 1.0) * 0.5;
+          // YouTube VR風の樽型レンズ歪み処理
+          vec2 distortion = p * (1.0 + k * r2);
+          vec2 finalUv = (distortion + 1.0) * 0.5;
+
+          // 範囲外を黒く塗りつぶし（正方形の枠）
+          if (finalUv.x >= 0.0 && finalUv.x <= 1.0 && finalUv.y >= 0.0 && finalUv.y <= 1.0) {
             gl_FragColor = texture2D(map, finalUv);
           } else {
             gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -251,33 +241,36 @@
 
     renderer.clear();
 
-    // 左目
-    renderer.setViewport(0, 0, width / 2, height);
-    renderer.setScissor(0, 0, width / 2, height);
+    // --- 画像のイラスト通りのビューポート配置設定 ---
+    // 画面左右それぞれの枠幅（半分の幅）
+    const halfWidth = width / 2;
+    
+    // 表示サイズ（左右それぞれの画面中央に約70%のサイズで配置）
+    const viewSize = Math.min(halfWidth, height) * 0.70;
+
+    // 左目の表示位置 (左半分の中央)
+    const leftX = (halfWidth - viewSize) / 2;
+    const leftY = (height - viewSize) / 2;
+
+    // 右目の表示位置 (右半分の中央)
+    const rightX = halfWidth + (halfWidth - viewSize) / 2;
+    const rightY = (height - viewSize) / 2;
+
+    // 1. 左目の描画
+    renderer.setViewport(leftX, leftY, viewSize, viewSize);
+    renderer.setScissor(leftX, leftY, viewSize, viewSize);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraLeft);
 
-    // 右目
-    renderer.setViewport(width / 2, 0, width / 2, height);
-    renderer.setScissor(width / 2, 0, width / 2, height);
+    // 2. 右目の描画
+    renderer.setViewport(rightX, rightY, viewSize, viewSize);
+    renderer.setScissor(rightX, rightY, viewSize, viewSize);
     renderer.setScissorTest(true);
     renderer.render(scene, cameraRight);
   }
 
   function onWindowResize() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const aspect = (width / 2) / height;
-
-    if (cameraLeft && cameraRight) {
-      cameraLeft.aspect = aspect;
-      cameraLeft.updateProjectionMatrix();
-
-      cameraRight.aspect = aspect;
-      cameraRight.updateProjectionMatrix();
-    }
-
-    renderer.setSize(width, height);
+    renderer.setSize(window.innerWidth, window.innerHeight);
   }
 </script>
 
