@@ -1,4 +1,261 @@
 
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>VR Camera</title>
+<style>
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;overscroll-behavior:none}
+button,input,select{font:inherit}
+button{border:0;border-radius:10px;padding:12px;font-weight:600;background:#fff;color:#111;touch-action:manipulation}
+button:disabled{opacity:.5}
+#app{position:fixed;inset:0;width:100%;height:100%;height:100dvh;background:#000;overflow:hidden}
+#view{position:absolute;inset:0;width:100%;height:100%;display:block}
+#camera{display:none}
+#controls{position:absolute;z-index:5;inset:0;overflow-y:auto;background:rgba(12,12,12,.97);padding:calc(18px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:13px}
+#controls.hidden{display:none}
+h1{font-size:24px;margin:0}
+p{font-size:13px;line-height:1.6;color:#ccc;margin:0}
+.group{display:flex;flex-direction:column;gap:5px}
+.label{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+input[type=range]{width:100%;height:28px;accent-color:#60a5fa;touch-action:pan-y}
+.row{display:flex;gap:8px}
+.row button{flex:1;min-width:0}
+.primary{background:#3b82f6;color:white}
+.secondary{background:#333;color:white}
+#status{font-size:13px;line-height:1.6;color:#facc15;overflow-wrap:anywhere;white-space:pre-wrap}
+#hud{position:absolute;z-index:4;top:calc(8px + env(safe-area-inset-top));left:8px;right:8px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+#hud.hidden{display:none}
+#hud button{pointer-events:auto;background:rgba(35,35,35,.85);color:white;border:1px solid #666;padding:10px 13px;font-size:13px}
+#message{position:absolute;z-index:3;bottom:calc(10px + env(safe-area-inset-bottom));left:8px;right:8px;text-align:center;font-size:12px;color:#ddd;text-shadow:0 1px 4px #000;pointer-events:none}
+#message.hidden{display:none}
+select{width:100%;background:#252525;color:white;border:1px solid #555;border-radius:8px;padding:12px}
+:fullscreen #app,#app:fullscreen{width:100%;height:100%;background:#000}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="view"></canvas>
+  <video id="camera" autoplay playsinline webkit-playsinline muted></video>
+
+  <div id="hud" class="hidden">
+    <button id="panelBtn">⚙ 設定</button>
+    <button id="fullBtn">全画面</button>
+  </div>
+  <div id="message" class="hidden">左上の「設定」で調整できます</div>
+
+  <section id="controls">
+    <h1>VR Camera</h1>
+    <p>iPhone 17・Lufthansa VR Viewer用<br>左右のレンズにカメラ映像を表示します。</p>
+
+    <div class="row">
+      <button id="startBtn" class="primary">カメラを起動</button>
+      <button id="fullStartBtn" class="secondary">全画面表示</button>
+    </div>
+
+    <div id="status">カメラはまだ起動していません。</div>
+
+    <div class="group">
+      <div class="label"><span>カメラ倍率</span><span id="cameraZoomVal">0.6倍を希望</span></div>
+      <select id="cameraZoom">
+        <option value="0.6" selected>0.6倍相当（超広角を探す）</option>
+        <option value="1">1倍（標準カメラを探す）</option>
+      </select>
+      <button id="applyCameraZoom" class="secondary">カメラを切り替える</button>
+      <p>※ 実際の超広角カメラを取得できない場合、0.6倍になったとは表示しません。</p>
+    </div>
+
+    <div class="group">
+      <div class="label"><span>映像の回転</span><span id="rotVal">0°</span></div>
+      <input id="rotation" type="range" min="0" max="270" step="90" value="0">
+    </div>
+
+    <div class="group">
+      <div class="label"><span>表示倍率</span><span id="zoomVal">1.00×</span></div>
+      <input id="zoom" type="range" min="0.7" max="2.5" step="0.01" value="1">
+      <p>これは画面表示上の拡大率です。カメラの光学倍率ではありません。</p>
+    </div>
+
+    <div class="group">
+      <div class="label"><span>映像の左右位置</span><span id="xVal">0</span></div>
+      <input id="shiftX" type="range" min="-100" max="100" step="1" value="0">
+    </div>
+
+    <div class="group">
+      <div class="label"><span>映像の上下位置</span><span id="yVal">0</span></div>
+      <input id="shiftY" type="range" min="-100" max="100" step="1" value="0">
+    </div>
+
+    <div class="group">
+      <div class="label"><span>左右映像の間隔</span><span id="ipdVal">42.8%</span></div>
+      <input id="ipd" type="range" min="35" max="50" step="0.1" value="42.8">
+    </div>
+
+    <div class="group">
+      <div class="label"><span>レンズ位置の上下調整</span><span id="lensYVal">0</span></div>
+      <input id="lensY" type="range" min="-100" max="100" step="1" value="0">
+    </div>
+
+    <div class="row">
+      <button id="resetBtn" class="secondary">設定をリセット</button>
+      <button id="hideBtn" class="primary">映像だけにする</button>
+    </div>
+
+    <p>GitHub PagesのHTTPSで開いてください。ブラウザのバーまで隠す場合は、Safariの共有メニューから「ホーム画面に追加」し、追加したアイコンから開いてください。</p>
+  </section>
+</div>
+
+<script>
+const canvas=document.getElementById("view");
+const ctx=canvas.getContext("2d",{alpha:false});
+const video=document.getElementById("camera");
+const controls=document.getElementById("controls");
+const hud=document.getElementById("hud");
+const message=document.getElementById("message");
+const status=document.getElementById("status");
+const $=id=>document.getElementById(id);
+
+const defaults={rotation:0,zoom:1,shiftX:0,shiftY:0,ipd:42.8,lensY:0};
+const settings={...defaults};
+
+let stream=null;
+let currentTrack=null;
+let currentCameraLabel="";
+let currentMode="unknown";
+let animating=false;
+let switching=false;
+let immersive=false;
+let availableCameras=[];
+
+function setStatus(text){
+  status.textContent=text;
+}
+
+function readSettings(){
+  for(const key of Object.keys(settings)){
+    settings[key]=Number($(key).value);
+  }
+  $("rotVal").textContent=settings.rotation+"°";
+  $("zoomVal").textContent=settings.zoom.toFixed(2)+"×";
+  $("xVal").textContent=settings.shiftX;
+  $("yVal").textContent=settings.shiftY;
+  $("ipdVal").textContent=settings.ipd.toFixed(1)+"%";
+  $("lensYVal").textContent=settings.lensY;
+  draw();
+}
+
+["rotation","zoom","shiftX","shiftY","ipd","lensY"].forEach(id=>{
+  $(id).addEventListener("input",readSettings);
+});
+
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=Math.max(1,window.innerWidth);
+  const h=Math.max(1,window.innerHeight);
+  canvas.width=Math.round(w*dpr);
+  canvas.height=Math.round(h*dpr);
+  canvas.style.width=w+"px";
+  canvas.style.height=h+"px";
+  draw();
+}
+
+function drawEye(x,y,w,h){
+  if(video.readyState<2||!video.videoWidth||!video.videoHeight){
+    ctx.fillStyle="#000";
+    ctx.fillRect(x,y,w,h);
+    return;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x,y,w,h);
+  ctx.clip();
+
+  const vw=video.videoWidth;
+  const vh=video.videoHeight;
+  const quarter=settings.rotation%180!==0;
+  const rotatedW=quarter?vh:vw;
+  const rotatedH=quarter?vw:vh;
+  const scale=Math.max(w/rotatedW,h/rotatedH)*settings.zoom;
+  const dw=vw*scale;
+  const dh=vh*scale;
+  const dx=x+w/2+settings.shiftX*w/100;
+  const dy=y+h/2+(settings.shiftY+settings.lensY)*h/100;
+
+  ctx.translate(dx,dy);
+  ctx.rotate(settings.rotation*Math.PI/180);
+  ctx.drawImage(video,-dw/2,-dh/2,dw,dh);
+  ctx.restore();
+}
+
+function draw(){
+  if(!canvas.width||!canvas.height)return;
+  const w=canvas.width;
+  const h=canvas.height;
+  ctx.fillStyle="#000";
+  ctx.fillRect(0,0,w,h);
+
+  const separation=w*settings.ipd/100;
+  const eyeW=w/2;
+  const leftCenter=w/2-separation/2;
+  const rightCenter=w/2+separation/2;
+
+  drawEye(leftCenter-eyeW/2,0,eyeW,h);
+  drawEye(rightCenter-eyeW/2,0,eyeW,h);
+
+  ctx.fillStyle="#000";
+  ctx.fillRect(w/2-1,0,2,h);
+}
+
+function animate(){
+  draw();
+  requestAnimationFrame(animate);
+}
+
+function stopCamera(){
+  if(stream){
+    stream.getTracks().forEach(track=>track.stop());
+    stream=null;
+  }
+  currentTrack=null;
+  video.srcObject=null;
+}
+
+function getCameraInfo(track){
+  let caps={};
+  let actual={};
+  try{
+    if(typeof track.getCapabilities==="function")caps=track.getCapabilities();
+    if(typeof track.getSettings==="function")actual=track.getSettings();
+  }catch(e){}
+  return {caps,actual};
+}
+
+async function enumerateCameras(){
+  try{
+    const devices=await navigator.mediaDevices.enumerateDevices();
+    availableCameras=devices.filter(d=>d.kind==="videoinput");
+    return availableCameras;
+  }catch(e){
+    availableCameras=[];
+    return [];
+  }
+}
+
+function describeCamera(label){
+  const s=(label||"").toLowerCase();
+  if(/ultra.?wide|ultrawide|超広角|0[.,]5x|0[.,]6x/.test(s))return "ultra";
+  if(/wide.?angle|wide camera|main camera|メインカメラ|広角/.test(s))return "wide";
+  if(/back|rear|environment|背面|後ろ/.test(s))return "back";
+  return "unknown";
+}
+
+
 async function openCamera(mode){
   if(switching)return;
   switching=true;
@@ -129,3 +386,151 @@ async function openCamera(mode){
     $("startBtn").textContent=stream?"カメラ起動済み":"カメラを起動";
   }
 }
+
+    stream=await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject=stream;
+    await video.play();
+
+    if(video.readyState<2){
+      await new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(new Error("映像の準備がタイムアウトしました")),10000);
+        video.addEventListener("loadeddata",()=>{
+          clearTimeout(timer);
+          resolve();
+        },{once:true});
+      });
+    }
+
+    currentTrack=stream.getVideoTracks()[0];
+    currentCameraLabel=currentTrack.label||chosen?.label||"名称不明のカメラ";
+    currentMode=mode;
+
+    const {caps,actual}=getCameraInfo(currentTrack);
+    const zoomCaps=caps.zoom;
+    const actualZoom=actual.zoom;
+    let details="取得したカメラ: "+currentCameraLabel+"\n";
+    details+="映像サイズ: "+video.videoWidth+" × "+video.videoHeight+"\n";
+
+    if(mode==="ultra"){
+      if(chosen&&describeCamera(currentCameraLabel)==="ultra"){
+        details+="判定: 超広角と識別されたカメラを取得しました。\n";
+        details+="※ 0.6倍相当の正確な画角までは保証されません。";
+        $("cameraZoomVal").textContent="超広角を取得";
+      }else{
+        details+="判定: 0.6倍相当の超広角を確認できません。\n";
+        details+=candidateMessage||"Safariがレンズを区別して公開していない可能性があります。";
+        details+="\nこの映像を0.6倍だとは扱っていません。";
+        $("cameraZoomVal").textContent="未確認";
+      }
+    }else{
+      if(chosen&&describeCamera(currentCameraLabel)==="wide"){
+        details+="判定: 標準広角と識別されたカメラを取得しました。";
+      }else{
+        details+="判定: 標準カメラかどうかは確認できません。";
+      }
+      $("cameraZoomVal").textContent="1倍を要求";
+    }
+
+    if(zoomCaps){
+      details+="\nAPIのズーム範囲: "+zoomCaps.min+"～"+zoomCaps.max;
+      if(typeof actualZoom==="number")details+="\n現在のズーム値: "+actualZoom;
+    }else{
+      details+="\nAPIによるカメラズーム調整: 非対応";
+    }
+
+    if(!chosen){
+      details+="\n注意: 背面カメラを指定しましたが、レンズの選択はSafari側に任されています。";
+    }
+
+    setStatus(details);
+    resize();
+
+  }catch(err){
+    console.error(err);
+    setStatus("カメラの切り替えに失敗しました。\n"+err.name+": "+err.message+"\nSafariのカメラ許可とHTTPS接続を確認してください。");
+  }finally{
+    switching=false;
+    $("startBtn").disabled=false;
+    $("applyCameraZoom").disabled=false;
+    $("startBtn").textContent=stream?"カメラ起動済み":"カメラを起動";
+  }
+}
+
+async function startCamera(){
+  await openCamera($("cameraZoom").value==="0.6"?"ultra":"wide");
+}
+
+async function fullscreen(){
+  if(document.fullscreenElement){
+    try{await document.exitFullscreen()}catch(e){}
+    return;
+  }
+
+  const target=document.documentElement;
+  const request=target.requestFullscreen||target.webkitRequestFullscreen;
+
+  if(request){
+    try{
+      await request.call(target);
+      enterImmersive();
+      return;
+    }catch(e){
+      console.log("Fullscreen API unavailable",e);
+    }
+  }
+
+  enterImmersive();
+  setStatus((status.textContent||"")+" \nSafariのページ全画面APIは利用できません。映像だけの表示にしました。ブラウザのバーまで隠すにはホーム画面に追加して起動してください。");
+}
+
+function enterImmersive(){
+  immersive=true;
+  controls.classList.add("hidden");
+  hud.classList.remove("hidden");
+  message.classList.remove("hidden");
+  resize();
+}
+
+function exitImmersive(){
+  immersive=false;
+  controls.classList.remove("hidden");
+  hud.classList.add("hidden");
+  message.classList.add("hidden");
+  resize();
+}
+
+$("startBtn").addEventListener("click",startCamera);
+$("applyCameraZoom").addEventListener("click",async()=>{
+  await openCamera($("cameraZoom").value==="0.6"?"ultra":"wide");
+});
+$("cameraZoom").addEventListener("change",()=>{
+  $("cameraZoomVal").textContent=$("cameraZoom").value==="0.6"?"0.6倍を要求":"1倍を要求";
+});
+$("fullStartBtn").addEventListener("click",fullscreen);
+$("fullBtn").addEventListener("click",fullscreen);
+$("hideBtn").addEventListener("click",enterImmersive);
+$("panelBtn").addEventListener("click",exitImmersive);
+$("resetBtn").addEventListener("click",()=>{
+  for(const [key,value] of Object.entries(defaults))$(key).value=value;
+  readSettings();
+});
+
+document.addEventListener("fullscreenchange",resize);
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"){
+    resize();
+    if(stream&&video.paused)video.play().catch(()=>{});
+  }
+});
+window.addEventListener("resize",resize);
+window.addEventListener("orientationchange",()=>setTimeout(resize,300));
+
+resize();
+readSettings();
+if(!animating){
+  animating=true;
+  requestAnimationFrame(animate);
+}
+</script>
+</body>
+</html>
