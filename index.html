@@ -1,267 +1,271 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-  <title>YouTube VR180 Fisheye Camera Viewer</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #000;
-      font-family: sans-serif;
-      touch-action: none;
-    }
-    #ui {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      color: white;
-      z-index: 10;
-      background: rgba(0, 0, 0, 0.85);
-      padding: 12px;
-      border-radius: 8px;
-      max-width: 300px;
-      display: block;
-    }
-    button {
-      padding: 10px 18px;
-      font-size: 14px;
-      font-weight: bold;
-      cursor: pointer;
-      margin-bottom: 8px;
-      width: 100%;
-    }
-    .control-group {
-      margin-top: 8px;
-    }
-    label {
-      display: block;
-      font-size: 12px;
-      margin-bottom: 4px;
-    }
-    input[type="range"] {
-      width: 100%;
-    }
-  </style>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
-      }
-    }
-  </script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>VR Camera</title>
+<style>
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden}
+body{height:100dvh}
+#app{position:fixed;inset:0;background:#000;overflow:hidden}
+#view{width:100%;height:100%;display:block}
+#controls{position:absolute;inset:0;overflow-y:auto;background:rgba(0,0,0,.84);padding:calc(20px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:15px}
+h1{font-size:23px;margin:0}
+p{font-size:13px;line-height:1.65;color:#ccc;margin:0}
+.group{display:flex;flex-direction:column;gap:7px}
+.label{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+input[type=range]{width:100%;accent-color:#60a5fa;height:28px}
+button{border:0;border-radius:10px;padding:13px 15px;font-size:15px;font-weight:600;background:#fff;color:#111;cursor:pointer;touch-action:manipulation}
+button:disabled{opacity:.5}
+.row{display:flex;gap:9px}
+.row button{flex:1;min-width:0}
+.primary{background:#3b82f6;color:white}
+.secondary{background:#333;color:white}
+#status{font-size:13px;color:#facc15;line-height:1.5}
+#hud{position:absolute;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+#hud button{pointer-events:auto;padding:10px 13px;font-size:13px;background:rgba(35,35,35,.8);color:#fff;border:1px solid #555}
+#hud.hidden{display:none}
+#controls.hidden{display:none}
+#app:fullscreen{width:100%;height:100%;background:#000}
+@media (orientation:portrait){
+  #controls{gap:12px}
+}
+</style>
 </head>
 <body>
-
-<div id="ui">
-  <button id="start-btn">カメラ起動</button>
-  <p id="status">ボタンを押してカメラを許可してください。端末を横向きにしてご使用ください。</p>
-  
-  <div class="control-group">
-    <label for="ipd-range">目の間隔調整 (IPD): <span id="ipd-val">0.064</span></label>
-    <input type="range" id="ipd-range" min="0.03" max="0.10" step="0.002" value="0.064">
+<div id="app">
+  <canvas id="view"></canvas>
+  <div id="hud" class="hidden">
+    <button id="panelBtn">設定</button>
+    <button id="fullBtn">全画面</button>
   </div>
+  <section id="controls">
+    <h1>VR Camera</h1>
+    <p>iPhone 17 ＋ Lufthansa VR Viewer<br>左右のレンズにカメラ映像を表示します。ゴーグルに装着してから調整してください。</p>
+    <div class="row">
+      <button id="startBtn" class="primary">カメラを起動</button>
+      <button id="fullStartBtn" class="secondary">全画面</button>
+    </div>
+    <div id="status">カメラはまだ起動していません。</div>
+    <div class="group">
+      <div class="label"><span>映像の回転</span><span id="rotVal">90°</span></div>
+      <input id="rotation" type="range" min="0" max="270" step="90" value="90">
+    </div>
+    <div class="group">
+      <div class="label"><span>拡大率</span><span id="zoomVal">1.00×</span></div>
+      <input id="zoom" type="range" min="0.7" max="2.5" step="0.01" value="1">
+    </div>
+    <div class="group">
+      <div class="label"><span>左右位置</span><span id="xVal">0</span></div>
+      <input id="shiftX" type="range" min="-100" max="100" step="1" value="0">
+    </div>
+    <div class="group">
+      <div class="label"><span>上下位置</span><span id="yVal">0</span></div>
+      <input id="shiftY" type="range" min="-100" max="100" step="1" value="0">
+    </div>
+    <div class="group">
+      <div class="label"><span>左右の目の間隔（画面幅に対する割合）</span><span id="ipdVal">42.8%</span></div>
+      <input id="ipd" type="range" min="35" max="50" step="0.1" value="42.8">
+    </div>
+    <div class="group">
+      <div class="label"><span>レンズ位置の上下調整</span><span id="lensYVal">0</span></div>
+      <input id="lensY" type="range" min="-100" max="100" step="1" value="0">
+    </div>
+    <div class="row">
+      <button id="resetBtn" class="secondary">設定をリセット</button>
+      <button id="hideBtn" class="primary">映像だけにする</button>
+    </div>
+    <p>全画面表示ができない場合は、Safariの共有メニューから「ホーム画面に追加」して起動してください。カメラの利用にはHTTPSとカメラへのアクセス許可が必要です。</p>
+  </section>
 </div>
+<video id="camera" autoplay playsinline muted style="display:none"></video>
+<script>
+const canvas=document.getElementById("view");
+const ctx=canvas.getContext("2d",{alpha:false});
+const video=document.getElementById("camera");
+const controls=document.getElementById("controls");
+const hud=document.getElementById("hud");
+const status=document.getElementById("status");
+const $=id=>document.getElementById(id);
+let stream=null;
+let running=false;
 
-<video id="webcam" autoplay playsinline style="display:none;"></video>
+const defaults={rotation:90,zoom:1,shiftX:0,shiftY:0,ipd:42.8,lensY:0};
+const settings={...defaults};
 
-<script type="module">
-  import * as THREE from 'three';
+function readSettings(){
+  settings.rotation=Number($("rotation").value);
+  settings.zoom=Number($("zoom").value);
+  settings.shiftX=Number($("shiftX").value);
+  settings.shiftY=Number($("shiftY").value);
+  settings.ipd=Number($("ipd").value);
+  settings.lensY=Number($("lensY").value);
+  $("rotVal").textContent=settings.rotation+"°";
+  $("zoomVal").textContent=settings.zoom.toFixed(2)+"×";
+  $("xVal").textContent=settings.shiftX;
+  $("yVal").textContent=settings.shiftY;
+  $("ipdVal").textContent=settings.ipd.toFixed(1)+"%";
+  $("lensYVal").textContent=settings.lensY;
+  draw();
+}
 
-  let scene, cameraLeft, cameraRight, renderer, video, videoTexture;
-  let eyeSep = 0.064; 
+["rotation","zoom","shiftX","shiftY","ipd","lensY"].forEach(id=>{
+  $(id).addEventListener("input",readSettings);
+});
 
-  const startBtn = document.getElementById('start-btn');
-  const ui = document.getElementById('ui');
-  const status = document.getElementById('status');
-  const ipdRange = document.getElementById('ipd-range');
-  const ipdVal = document.getElementById('ipd-val');
-  video = document.getElementById('webcam');
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=Math.max(1,window.innerWidth);
+  const h=Math.max(1,window.innerHeight);
+  canvas.width=Math.round(w*dpr);
+  canvas.height=Math.round(h*dpr);
+  canvas.style.width=w+"px";
+  canvas.style.height=h+"px";
+  draw();
+}
+window.addEventListener("resize",resize);
+window.addEventListener("orientationchange",()=>setTimeout(resize,250));
 
-  ipdRange.addEventListener('input', (e) => {
-    eyeSep = parseFloat(e.target.value);
-    ipdVal.textContent = eyeSep.toFixed(3);
-    updateCameraPositions();
-  });
+function drawEye(x,y,w,h){
+  if(video.readyState<2||!video.videoWidth||!video.videoHeight){
+    ctx.fillStyle="#000";
+    ctx.fillRect(x,y,w,h);
+    return;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x,y,w,h);
+  ctx.clip();
 
-  startBtn.addEventListener('click', async () => {
-    requestFullScreenMode();
-    ui.style.display = 'none';
+  const vw=video.videoWidth;
+  const vh=video.videoHeight;
+  const angle=settings.rotation*Math.PI/180;
+  const quarter=settings.rotation%180!==0;
 
-    try {
-      // 超広角レンズ（0.5x等）を優先的に選択してズームを解除するパラメータ設定
-      const constraints = {
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          zoom: { ideal: 0.5 } 
-        },
-        audio: false
-      };
+  const rotatedW=quarter?vh:vw;
+  const rotatedH=quarter?vw:vh;
+  const scale=Math.max(w/rotatedW,h/rotatedH)*settings.zoom;
+  const dw=vw*scale;
+  const dh=vh*scale;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      video.srcObject = stream;
-      await video.play();
+  const dx=x+w/2+settings.shiftX*w/100;
+  const dy=y+h/2+(settings.shiftY+settings.lensY)*h/100;
 
-      // カメラがサポートしている場合は最小倍率（広角側）に完全固定
-      const track = stream.getVideoTracks()[0];
-      if (track && track.getCapabilities) {
-        const capabilities = track.getCapabilities();
-        if (capabilities.zoom) {
-          try {
-            await track.applyConstraints({ advanced: [{ zoom: capabilities.zoom.min }] });
-          } catch (e) {}
-        }
+  ctx.translate(dx,dy);
+  ctx.rotate(angle);
+  ctx.drawImage(video,-dw/2,-dh/2,dw,dh);
+  ctx.restore();
+}
+
+function draw(){
+  if(!canvas.width||!canvas.height)return;
+  const w=canvas.width;
+  const h=canvas.height;
+  ctx.fillStyle="#000";
+  ctx.fillRect(0,0,w,h);
+
+  // レンズ間隔の設定値に合わせて左右の映像の中心を配置
+  const separation=w*settings.ipd/100;
+  const leftCenter=w/2-separation/2;
+  const rightCenter=w/2+separation/2;
+  const eyeW=w/2;
+
+  drawEye(leftCenter-eyeW/2,0,eyeW,h);
+  drawEye(rightCenter-eyeW/2,0,eyeW,h);
+
+  // 左右の境界線
+  ctx.fillStyle="rgba(0,0,0,.45)";
+  ctx.fillRect(w/2-1,0,2,h);
+}
+
+async function startCamera(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    status.textContent="カメラを利用できません。HTTPSのGitHub Pagesで開いてください。";
+    return;
+  }
+  $("startBtn").disabled=true;
+  status.textContent="カメラを起動しています…";
+  try{
+    if(stream)stream.getTracks().forEach(track=>track.stop());
+    stream=await navigator.mediaDevices.getUserMedia({
+      audio:false,
+      video:{
+        facingMode:{ideal:"environment"},
+        width:{ideal:1920},
+        height:{ideal:1080}
       }
-
-      initThreeJS();
-    } catch (err) {
-      ui.style.display = 'block';
-      status.textContent = "起動に失敗しました: " + err.message;
-    }
-  });
-
-  function requestFullScreenMode() {
-    const docEl = document.documentElement;
-    if (docEl.requestFullscreen) {
-      docEl.requestFullscreen().catch(() => {});
-    } else if (docEl.webkitRequestFullscreen) {
-      docEl.webkitRequestFullscreen().catch(() => {});
-    } else if (docEl.msRequestFullscreen) {
-      docEl.msRequestFullscreen().catch(() => {});
-    }
-  }
-
-  function initThreeJS() {
-    scene = new THREE.Scene();
-
-    // 視野角(FOV)を120度の超超広角にして「望遠鏡（ズーム）感」を撤去
-    const aspect = (window.innerWidth / 2) / window.innerHeight;
-    cameraLeft = new THREE.PerspectiveCamera(120, aspect, 0.01, 100);
-    cameraRight = new THREE.PerspectiveCamera(120, aspect, 0.01, 100);
-    
-    updateCameraPositions();
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.autoClear = false;
-    document.body.appendChild(renderer.domElement);
-
-    videoTexture = new THREE.VideoTexture(video);
-    videoTexture.colorSpace = THREE.SRGBColorSpace;
-
-    // VR180 Creator / Insta360等と同等仕様の 180° Equisolid 魚眼シェーダー
-    const vr180FisheyeMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        map: { value: videoTexture }
-      },
-      vertexShader: `
-        varying vec3 vWorldPosition;
-        void main() {
-          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-          vWorldPosition = worldPosition.xyz;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D map;
-        varying vec3 vWorldPosition;
-
-        #define PI 3.14159265359
-
-        void main() {
-          vec3 dir = normalize(vWorldPosition);
-
-          // 球体座標から魚眼角度 theta / phi を算出
-          float theta = atan(dir.x, -dir.z); // 水平角
-          float phi = asin(dir.y);          // 垂直角
-
-          // 180度魚眼マッピング（Equisolid / Equidistant 式展開）
-          float r = 2.0 * sin(acos(-dir.z) / 2.0); 
-          float angle = atan(dir.y, dir.x);
-
-          vec2 uv;
-          uv.x = (r * cos(angle)) * 0.5 + 0.5;
-          
-          // ★上下反転の修正（1.0 - にすることで正しい正位置へ）
-          uv.y = 1.0 - ((r * sin(angle)) * 0.5 + 0.5);
-
-          // 180度範囲外は黒としてマスク
-          if (dir.z < 0.0 && uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            gl_FragColor = texture2D(map, uv);
-          } else {
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-          }
-        }
-      `,
-      side: THREE.BackSide
     });
-
-    // 180度ドーム型の3D全天球ドームメッシュを作成
-    const geometry = new THREE.SphereGeometry(10, 64, 64, 0, Math.PI * 2, 0, Math.PI);
-    const sphere = new THREE.Mesh(geometry, vr180FisheyeMaterial);
-    scene.add(sphere);
-
-    animate();
-    window.addEventListener('resize', onWindowResize);
+    video.srcObject=stream;
+    await video.play();
+    running=true;
+    status.textContent="カメラ起動中。ゴーグルに装着して位置を調整してください。";
+    $("startBtn").textContent="カメラ起動中";
+    resize();
+  }catch(err){
+    console.error(err);
+    status.textContent="カメラを起動できませんでした: "+err.message+"。Safariのカメラ許可を確認してください。";
+    $("startBtn").disabled=false;
   }
+}
 
-  function updateCameraPositions() {
-    if (cameraLeft && cameraRight) {
-      // カメラ位置を少し前方に押し出すことで望遠感を無くし視野を完全確保
-      cameraLeft.position.set(-eyeSep / 2, 0, 0.1);
-      cameraRight.position.set(eyeSep / 2, 0, 0.1);
-      
-      cameraLeft.lookAt(0, 0, -10);
-      cameraRight.lookAt(0, 0, -10);
+async function fullscreen(){
+  try{
+    if(document.fullscreenElement){
+      await document.exitFullscreen();
+      return;
     }
-  }
-
-  function animate() {
-    requestAnimationFrame(animate);
-
-    if (!scene) return;
-
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-
-    renderer.clear();
-
-    const halfWidth = width / 2;
-
-    // 左目表示
-    renderer.setViewport(0, 0, halfWidth, height);
-    renderer.setScissor(0, 0, halfWidth, height);
-    renderer.setScissorTest(true);
-    renderer.render(scene, cameraLeft);
-
-    // 右目表示
-    renderer.setViewport(halfWidth, 0, halfWidth, height);
-    renderer.setScissor(halfWidth, 0, halfWidth, height);
-    renderer.setScissorTest(true);
-    renderer.render(scene, cameraRight);
-  }
-
-  function onWindowResize() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const aspect = (width / 2) / height;
-
-    if (cameraLeft && cameraRight) {
-      cameraLeft.aspect = aspect;
-      cameraLeft.updateProjectionMatrix();
-
-      cameraRight.aspect = aspect;
-      cameraRight.updateProjectionMatrix();
+    if(document.documentElement.requestFullscreen){
+      await document.documentElement.requestFullscreen();
+      return;
     }
-
-    renderer.setSize(width, height);
+    if($("app").webkitRequestFullscreen){
+      $("app").webkitRequestFullscreen();
+      return;
+    }
+    status.textContent="このSafariではページ全体の全画面APIが使えません。ホーム画面に追加して起動すると、ブラウザのバーを隠せます。";
+  }catch(err){
+    status.textContent="全画面にできませんでした。ホーム画面に追加して起動してください。";
   }
+}
+
+function immersive(){
+  controls.classList.add("hidden");
+  hud.classList.remove("hidden");
+  draw();
+}
+
+function showControls(){
+  controls.classList.remove("hidden");
+  hud.classList.add("hidden");
+}
+
+$("startBtn").addEventListener("click",startCamera);
+$("fullStartBtn").addEventListener("click",fullscreen);
+$("fullBtn").addEventListener("click",fullscreen);
+$("hideBtn").addEventListener("click",immersive);
+$("panelBtn").addEventListener("click",showControls);
+
+$("resetBtn").addEventListener("click",()=>{
+  Object.entries(defaults).forEach(([key,value])=>{
+    const ids={rotation:"rotation",zoom:"zoom",shiftX:"shiftX",shiftY:"shiftY",ipd:"ipd",lensY:"lensY"};
+    $(ids[key]).value=value;
+  });
+  readSettings();
+});
+
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"&&running){
+    resize();
+  }
+});
+
+resize();
+readSettings();
 </script>
-
 </body>
 </html>
