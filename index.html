@@ -10,101 +10,118 @@
 <title>VR Camera</title>
 <style>
 *{box-sizing:border-box}
-html,body{width:100%;height:100%;margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden}
+html,body{width:100%;height:100%;margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;overscroll-behavior:none}
 body{height:100dvh}
-#app{position:fixed;inset:0;background:#000;overflow:hidden}
-#view{width:100%;height:100%;display:block}
-#controls{position:absolute;inset:0;overflow-y:auto;background:rgba(0,0,0,.84);padding:calc(20px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:15px}
-h1{font-size:23px;margin:0}
-p{font-size:13px;line-height:1.65;color:#ccc;margin:0}
-.group{display:flex;flex-direction:column;gap:7px}
-.label{display:flex;justify-content:space-between;gap:10px;font-size:14px}
-input[type=range]{width:100%;accent-color:#60a5fa;height:28px}
+button,input{font:inherit}
 button{border:0;border-radius:10px;padding:13px 15px;font-size:15px;font-weight:600;background:#fff;color:#111;cursor:pointer;touch-action:manipulation}
-button:disabled{opacity:.5}
+button:disabled{opacity:.55}
+#app{position:fixed;inset:0;width:100%;height:100%;height:100dvh;background:#000;overflow:hidden}
+#view{position:absolute;inset:0;width:100%;height:100%;display:block}
+#controls{position:absolute;z-index:5;inset:0;overflow-y:auto;overscroll-behavior:contain;background:rgba(15,15,15,.96);padding:calc(18px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px}
+#controls.hidden{display:none}
+h1{font-size:24px;margin:0}
+p{font-size:13px;line-height:1.6;color:#ccc;margin:0}
+.group{display:flex;flex-direction:column;gap:5px}
+.label{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+input[type=range]{width:100%;height:30px;accent-color:#60a5fa;touch-action:pan-y}
 .row{display:flex;gap:9px}
 .row button{flex:1;min-width:0}
-.primary{background:#3b82f6;color:white}
-.secondary{background:#333;color:white}
-#status{font-size:13px;color:#facc15;line-height:1.5}
-#hud{position:absolute;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
-#hud button{pointer-events:auto;padding:10px 13px;font-size:13px;background:rgba(35,35,35,.8);color:#fff;border:1px solid #555}
+.primary{background:#3b82f6;color:#fff}
+.secondary{background:#333;color:#fff}
+#status{font-size:13px;line-height:1.6;color:#facc15;overflow-wrap:anywhere}
+#hud{position:absolute;z-index:4;top:calc(8px + env(safe-area-inset-top));left:8px;right:8px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
 #hud.hidden{display:none}
-#controls.hidden{display:none}
-#app:fullscreen{width:100%;height:100%;background:#000}
-@media (orientation:portrait){
-  #controls{gap:12px}
-}
+#hud button{pointer-events:auto;background:rgba(35,35,35,.85);color:#fff;border:1px solid #666;padding:10px 14px;font-size:13px}
+#message{position:absolute;z-index:3;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));text-align:center;font-size:12px;color:#ddd;text-shadow:0 1px 4px #000;pointer-events:none}
+#message.hidden{display:none}
+#camera{display:none}
+:fullscreen #app,#app:fullscreen{width:100%;height:100%;background:#000}
+@media (display-mode:standalone){#app{height:100%;height:100dvh}}
 </style>
 </head>
 <body>
 <div id="app">
   <canvas id="view"></canvas>
+  <video id="camera" autoplay playsinline muted></video>
+
   <div id="hud" class="hidden">
-    <button id="panelBtn">設定</button>
-    <button id="fullBtn">全画面</button>
+    <button id="panelBtn">⚙ 設定</button>
+    <button id="exitBtn">表示を戻す</button>
   </div>
+
+  <div id="message" class="hidden">設定を開くには左上の「設定」を押してください</div>
+
   <section id="controls">
     <h1>VR Camera</h1>
-    <p>iPhone 17 ＋ Lufthansa VR Viewer<br>左右のレンズにカメラ映像を表示します。ゴーグルに装着してから調整してください。</p>
+    <p>iPhone 17・Lufthansa VR Viewer用<br>カメラ映像を左右のレンズに表示します。</p>
+
     <div class="row">
       <button id="startBtn" class="primary">カメラを起動</button>
-      <button id="fullStartBtn" class="secondary">全画面</button>
+      <button id="fullStartBtn" class="secondary">全画面表示</button>
     </div>
+
     <div id="status">カメラはまだ起動していません。</div>
+
     <div class="group">
-      <div class="label"><span>映像の回転</span><span id="rotVal">90°</span></div>
-      <input id="rotation" type="range" min="0" max="270" step="90" value="90">
+      <div class="label"><span>映像の回転</span><span id="rotVal">0°</span></div>
+      <input id="rotation" type="range" min="0" max="270" step="90" value="0">
     </div>
+
     <div class="group">
       <div class="label"><span>拡大率</span><span id="zoomVal">1.00×</span></div>
       <input id="zoom" type="range" min="0.7" max="2.5" step="0.01" value="1">
     </div>
+
     <div class="group">
-      <div class="label"><span>左右位置</span><span id="xVal">0</span></div>
+      <div class="label"><span>映像の左右位置</span><span id="xVal">0</span></div>
       <input id="shiftX" type="range" min="-100" max="100" step="1" value="0">
     </div>
+
     <div class="group">
-      <div class="label"><span>上下位置</span><span id="yVal">0</span></div>
+      <div class="label"><span>映像の上下位置</span><span id="yVal">0</span></div>
       <input id="shiftY" type="range" min="-100" max="100" step="1" value="0">
     </div>
+
     <div class="group">
-      <div class="label"><span>左右の目の間隔（画面幅に対する割合）</span><span id="ipdVal">42.8%</span></div>
+      <div class="label"><span>左右の映像の間隔</span><span id="ipdVal">42.8%</span></div>
       <input id="ipd" type="range" min="35" max="50" step="0.1" value="42.8">
     </div>
+
     <div class="group">
       <div class="label"><span>レンズ位置の上下調整</span><span id="lensYVal">0</span></div>
       <input id="lensY" type="range" min="-100" max="100" step="1" value="0">
     </div>
+
     <div class="row">
       <button id="resetBtn" class="secondary">設定をリセット</button>
       <button id="hideBtn" class="primary">映像だけにする</button>
     </div>
-    <p>全画面表示ができない場合は、Safariの共有メニューから「ホーム画面に追加」して起動してください。カメラの利用にはHTTPSとカメラへのアクセス許可が必要です。</p>
+
+    <p>全画面表示が使えないSafariでは、映像だけの表示に切り替えます。ブラウザのバーまで隠すには、共有メニューから「ホーム画面に追加」し、追加したアイコンから開いてください。</p>
   </section>
 </div>
-<video id="camera" autoplay playsinline muted style="display:none"></video>
+
 <script>
 const canvas=document.getElementById("view");
 const ctx=canvas.getContext("2d",{alpha:false});
 const video=document.getElementById("camera");
 const controls=document.getElementById("controls");
 const hud=document.getElementById("hud");
+const message=document.getElementById("message");
 const status=document.getElementById("status");
 const $=id=>document.getElementById(id);
-let stream=null;
-let running=false;
 
-const defaults={rotation:90,zoom:1,shiftX:0,shiftY:0,ipd:42.8,lensY:0};
+const defaults={rotation:0,zoom:1,shiftX:0,shiftY:0,ipd:42.8,lensY:0};
 const settings={...defaults};
+let stream=null;
+let animating=false;
+let immersive=false;
 
 function readSettings(){
-  settings.rotation=Number($("rotation").value);
-  settings.zoom=Number($("zoom").value);
-  settings.shiftX=Number($("shiftX").value);
-  settings.shiftY=Number($("shiftY").value);
-  settings.ipd=Number($("ipd").value);
-  settings.lensY=Number($("lensY").value);
+  for(const key of Object.keys(settings)){
+    const el=$(key);
+    if(el)settings[key]=Number(el.value);
+  }
   $("rotVal").textContent=settings.rotation+"°";
   $("zoomVal").textContent=settings.zoom.toFixed(2)+"×";
   $("xVal").textContent=settings.shiftX;
@@ -128,8 +145,6 @@ function resize(){
   canvas.style.height=h+"px";
   draw();
 }
-window.addEventListener("resize",resize);
-window.addEventListener("orientationchange",()=>setTimeout(resize,250));
 
 function drawEye(x,y,w,h){
   if(video.readyState<2||!video.videoWidth||!video.videoHeight){
@@ -137,6 +152,7 @@ function drawEye(x,y,w,h){
     ctx.fillRect(x,y,w,h);
     return;
   }
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(x,y,w,h);
@@ -144,9 +160,7 @@ function drawEye(x,y,w,h){
 
   const vw=video.videoWidth;
   const vh=video.videoHeight;
-  const angle=settings.rotation*Math.PI/180;
   const quarter=settings.rotation%180!==0;
-
   const rotatedW=quarter?vh:vw;
   const rotatedH=quarter?vw:vh;
   const scale=Math.max(w/rotatedW,h/rotatedH)*settings.zoom;
@@ -157,41 +171,48 @@ function drawEye(x,y,w,h){
   const dy=y+h/2+(settings.shiftY+settings.lensY)*h/100;
 
   ctx.translate(dx,dy);
-  ctx.rotate(angle);
+  ctx.rotate(settings.rotation*Math.PI/180);
   ctx.drawImage(video,-dw/2,-dh/2,dw,dh);
   ctx.restore();
 }
 
 function draw(){
   if(!canvas.width||!canvas.height)return;
+
   const w=canvas.width;
   const h=canvas.height;
   ctx.fillStyle="#000";
   ctx.fillRect(0,0,w,h);
 
-  // レンズ間隔の設定値に合わせて左右の映像の中心を配置
   const separation=w*settings.ipd/100;
+  const eyeW=w/2;
   const leftCenter=w/2-separation/2;
   const rightCenter=w/2+separation/2;
-  const eyeW=w/2;
 
   drawEye(leftCenter-eyeW/2,0,eyeW,h);
   drawEye(rightCenter-eyeW/2,0,eyeW,h);
 
-  // 左右の境界線
-  ctx.fillStyle="rgba(0,0,0,.45)";
+  ctx.fillStyle="#000";
   ctx.fillRect(w/2-1,0,2,h);
+}
+
+function animate(){
+  draw();
+  requestAnimationFrame(animate);
 }
 
 async function startCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    status.textContent="カメラを利用できません。HTTPSのGitHub Pagesで開いてください。";
+    status.textContent="カメラを利用できません。HTTPSのGitHub Pagesで開いているか確認してください。";
     return;
   }
+
   $("startBtn").disabled=true;
   status.textContent="カメラを起動しています…";
+
   try{
     if(stream)stream.getTracks().forEach(track=>track.stop());
+
     stream=await navigator.mediaDevices.getUserMedia({
       audio:false,
       video:{
@@ -200,12 +221,23 @@ async function startCamera(){
         height:{ideal:1080}
       }
     });
+
     video.srcObject=stream;
     await video.play();
-    running=true;
-    status.textContent="カメラ起動中。ゴーグルに装着して位置を調整してください。";
-    $("startBtn").textContent="カメラ起動中";
-    resize();
+
+    if(video.readyState<2){
+      await new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(new Error("カメラ映像の準備がタイムアウトしました")),10000);
+        video.addEventListener("loadeddata",()=>{
+          clearTimeout(timer);
+          resolve();
+        },{once:true});
+      });
+    }
+
+    status.textContent="カメラ起動中。映像が動いているか確認してください。";
+    $("startBtn").textContent="カメラ起動済み";
+    draw();
   }catch(err){
     console.error(err);
     status.textContent="カメラを起動できませんでした: "+err.message+"。Safariのカメラ許可を確認してください。";
@@ -214,58 +246,90 @@ async function startCamera(){
 }
 
 async function fullscreen(){
-  try{
-    if(document.fullscreenElement){
-      await document.exitFullscreen();
-      return;
-    }
-    if(document.documentElement.requestFullscreen){
-      await document.documentElement.requestFullscreen();
-      return;
-    }
-    if($("app").webkitRequestFullscreen){
-      $("app").webkitRequestFullscreen();
-      return;
-    }
-    status.textContent="このSafariではページ全体の全画面APIが使えません。ホーム画面に追加して起動すると、ブラウザのバーを隠せます。";
-  }catch(err){
-    status.textContent="全画面にできませんでした。ホーム画面に追加して起動してください。";
+  // iPhone Safariでは通常のページ全画面APIが使えないことがある
+  if(document.fullscreenElement){
+    try{await document.exitFullscreen()}catch(e){}
+    return;
   }
+
+  const target=document.documentElement;
+  const request=target.requestFullscreen||target.webkitRequestFullscreen;
+
+  if(request){
+    try{
+      await request.call(target);
+      immersive=true;
+      controls.classList.add("hidden");
+      hud.classList.remove("hidden");
+      message.classList.remove("hidden");
+      resize();
+      return;
+    }catch(err){
+      console.log("Fullscreen API unavailable",err);
+    }
+  }
+
+  // API非対応の場合も映像を画面いっぱいに表示する
+  enterImmersive();
+  status.textContent="映像だけの表示にしました。Safariの上下のバーを隠すには、共有メニューから「ホーム画面に追加」して、そのアイコンから起動してください。";
 }
 
-function immersive(){
+function enterImmersive(){
+  immersive=true;
   controls.classList.add("hidden");
   hud.classList.remove("hidden");
-  draw();
+  message.classList.remove("hidden");
+  resize();
 }
 
-function showControls(){
+function exitImmersive(){
+  immersive=false;
   controls.classList.remove("hidden");
   hud.classList.add("hidden");
+  message.classList.add("hidden");
+  resize();
 }
 
 $("startBtn").addEventListener("click",startCamera);
 $("fullStartBtn").addEventListener("click",fullscreen);
-$("fullBtn").addEventListener("click",fullscreen);
-$("hideBtn").addEventListener("click",immersive);
-$("panelBtn").addEventListener("click",showControls);
+$("hideBtn").addEventListener("click",enterImmersive);
+$("panelBtn").addEventListener("click",exitImmersive);
+$("exitBtn").addEventListener("click",exitImmersive);
 
 $("resetBtn").addEventListener("click",()=>{
-  Object.entries(defaults).forEach(([key,value])=>{
-    const ids={rotation:"rotation",zoom:"zoom",shiftX:"shiftX",shiftY:"shiftY",ipd:"ipd",lensY:"lensY"};
-    $(ids[key]).value=value;
-  });
+  for(const [key,value] of Object.entries(defaults)){
+    $(key).value=value;
+  }
   readSettings();
 });
 
+document.addEventListener("fullscreenchange",()=>{
+  if(!document.fullscreenElement&&immersive){
+    // 全画面APIを終了しても、映像のみの表示は維持
+    controls.classList.add("hidden");
+    hud.classList.remove("hidden");
+  }
+  resize();
+});
+
 document.addEventListener("visibilitychange",()=>{
-  if(document.visibilityState==="visible"&&running){
+  if(document.visibilityState==="visible"){
     resize();
+    if(video.srcObject&&video.paused){
+      video.play().catch(err=>console.log(err));
+    }
   }
 });
 
+window.addEventListener("resize",resize);
+window.addEventListener("orientationchange",()=>setTimeout(resize,300));
+
 resize();
 readSettings();
+if(!animating){
+  animating=true;
+  requestAnimationFrame(animate);
+}
 </script>
 </body>
 </html>
